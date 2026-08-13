@@ -61,7 +61,10 @@ client, err := notification.NewClient(notification.Config{
 ```go
 challenge, err := client.Delivery.EmailVerifications.Create(ctx, notification.CreateEmailVerificationInput{
     RecipientEmail: "admin@example.com",
-    TemplateID:     templateID,
+    Subject:        "모두의캠프 관리자 로그인 인증 코드",
+    Text:           "인증 코드: {{verification_code}}\n만료: {{expires_at}}",
+    HTML:           `<p>인증 코드: <strong>{{verification_code}}</strong></p>`,
+    ExpiresInSeconds: 600,
     Metadata: map[string]string{
         "consumer": "modo-camp",
         "purpose":  "admin_login",
@@ -74,13 +77,18 @@ if err != nil {
 fmt.Println(challenge.VerificationID)
 ```
 
+`Subject`와 `Text`를 지정하면 direct body mode입니다. `HTML`과 `Metadata`는 선택 사항이며,
+Delivery가 `{{verification_code}}`, `{{verification_link}}`, `{{expires_at}}`, metadata placeholder를
+치환합니다. code 방식에는 `{{verification_code}}`, link 방식에는 `{{verification_link}}`를 본문에
+포함해야 합니다.
+
 기본값:
 
 - `Method`: `notification.EmailVerificationMethodCode`
 - `ExpiresInSeconds`: `600`
 - `IdempotencyKey`: SDK가 자동 생성
 
-명시적으로 지정할 수도 있습니다.
+저장·게시한 template을 재사용해야 하는 경우에만 template mode를 사용합니다.
 
 ```go
 challenge, err := client.Delivery.EmailVerifications.Create(ctx, notification.CreateEmailVerificationInput{
@@ -92,6 +100,10 @@ challenge, err := client.Delivery.EmailVerifications.Create(ctx, notification.Cr
     IdempotencyKey:   requestID,
 })
 ```
+
+direct body 필드(`Subject`, `Text`, `HTML`)와 `TemplateID`는 함께 지정할 수 없습니다. SDK는 이
+경우 요청을 보내지 않고 `VALIDATION_ERROR`를 반환하며, Delivery API도 같은 mixed mode를 `422`로
+거절합니다. `TemplateVersion`은 `TemplateID`를 지정한 고급 경로에서만 사용할 수 있습니다.
 
 링크 방식이 필요하면 `RedirectURI`를 함께 넘깁니다.
 
@@ -161,6 +173,10 @@ if err != nil {
 
 서버가 `Retry-After`를 내려주면 `notification.Error.RetryAfter`에 반영됩니다.
 
+direct body가 app-user verification token으로 거절되면 Delivery API는
+`PROJECT_TOKEN_UNAUTHORIZED`를 반환합니다. 이 SDK는 Project API Token을 사용하는 Go 서버 전용이므로
+브라우저나 모바일 SDK에서 direct body를 호출하는 용도로 사용하면 안 됩니다.
+
 ## Idempotency
 
 `Create`는 `Idempotency-Key`를 사용합니다. 직접 넘기지 않으면 SDK가 `sdk:<random>` 형식으로 자동 생성합니다.
@@ -174,6 +190,7 @@ if err != nil {
 - Go server SDK client
 - Project API Token 기반 Authorization
 - Email verification create/confirm
+- direct body (`Subject`/`Text`/optional `HTML`/optional `Metadata`)와 template mode
 - 자동 idempotency key
 - typed error, request id, retry-after parsing
 - `http.Client`, timeout, base URL override

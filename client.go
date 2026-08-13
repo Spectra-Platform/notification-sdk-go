@@ -17,7 +17,7 @@ const (
 	DefaultBaseURL = "https://delivery.spectra.kr"
 
 	defaultTimeout   = 10 * time.Second
-	defaultUserAgent = "spectra-notification-go/0.1.0"
+	defaultUserAgent = "spectra-notification-go/0.1.1"
 )
 
 type Environment string

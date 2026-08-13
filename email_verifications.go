@@ -26,6 +26,9 @@ const (
 type CreateEmailVerificationInput struct {
 	RecipientEmail   string
 	Method           EmailVerificationMethod
+	Subject          string
+	Text             string
+	HTML             string
 	TemplateID       string
 	TemplateVersion  int
 	ExpiresInSeconds int
@@ -122,7 +125,10 @@ func (s *EmailVerificationService) Confirm(ctx context.Context, input ConfirmEma
 type createEmailVerificationRequest struct {
 	RecipientEmail   string            `json:"recipient_email"`
 	Method           string            `json:"method"`
-	TemplateID       string            `json:"template_id"`
+	Subject          string            `json:"subject,omitempty"`
+	Text             string            `json:"text,omitempty"`
+	HTML             string            `json:"html,omitempty"`
+	TemplateID       string            `json:"template_id,omitempty"`
 	TemplateVersion  *int              `json:"template_version,omitempty"`
 	ExpiresInSeconds int               `json:"expires_in_seconds"`
 	Metadata         map[string]string `json:"metadata,omitempty"`
@@ -138,9 +144,6 @@ func validateCreateEmailVerificationInput(input CreateEmailVerificationInput) er
 	if strings.TrimSpace(input.RecipientEmail) == "" {
 		return newValidationError("RecipientEmail is required")
 	}
-	if strings.TrimSpace(input.TemplateID) == "" {
-		return newValidationError("TemplateID is required")
-	}
 	method := defaultEmailVerificationMethod(input.Method)
 	if method != EmailVerificationMethodCode && method != EmailVerificationMethodLink {
 		return newValidationError("Method must be code or link")
@@ -151,6 +154,25 @@ func validateCreateEmailVerificationInput(input CreateEmailVerificationInput) er
 	}
 	if input.TemplateVersion < 0 {
 		return newValidationError("TemplateVersion must be greater than or equal to 0")
+	}
+
+	hasTemplate := strings.TrimSpace(input.TemplateID) != ""
+	hasDirectBodyField := strings.TrimSpace(input.Subject) != "" ||
+		strings.TrimSpace(input.Text) != "" ||
+		strings.TrimSpace(input.HTML) != ""
+	if hasTemplate && hasDirectBodyField {
+		return newValidationError("TemplateID cannot be combined with Subject, Text, or HTML")
+	}
+	if !hasTemplate && input.TemplateVersion > 0 {
+		return newValidationError("TemplateVersion is only supported with TemplateID")
+	}
+	if !hasTemplate {
+		if strings.TrimSpace(input.Subject) == "" {
+			return newValidationError("Subject is required for direct email verification")
+		}
+		if strings.TrimSpace(input.Text) == "" {
+			return newValidationError("Text is required for direct email verification")
+		}
 	}
 	if method == EmailVerificationMethodCode && strings.TrimSpace(input.RedirectURI) != "" {
 		return newValidationError("RedirectURI is only supported for link verification")
@@ -175,13 +197,20 @@ func newCreateEmailVerificationRequest(input CreateEmailVerificationInput) creat
 	request := createEmailVerificationRequest{
 		RecipientEmail:   strings.TrimSpace(input.RecipientEmail),
 		Method:           string(defaultEmailVerificationMethod(input.Method)),
-		TemplateID:       strings.TrimSpace(input.TemplateID),
 		ExpiresInSeconds: defaultEmailVerificationExpiresInSeconds(input.ExpiresInSeconds),
 		Metadata:         input.Metadata,
 		RedirectURI:      strings.TrimSpace(input.RedirectURI),
 	}
+	if templateID := strings.TrimSpace(input.TemplateID); templateID != "" {
+		request.TemplateID = templateID
+	}
 	if input.TemplateVersion > 0 {
 		request.TemplateVersion = &input.TemplateVersion
+	}
+	if request.TemplateID == "" {
+		request.Subject = strings.TrimSpace(input.Subject)
+		request.Text = strings.TrimSpace(input.Text)
+		request.HTML = strings.TrimSpace(input.HTML)
 	}
 	return request
 }

@@ -14,6 +14,13 @@
 - 제품 용어와 오류 의미는 JS Notification SDK/Delivery 계약과 맞추되, Go답게 `context.Context`, typed struct, typed error, `http.Client`, timeout, base URL override를 제공합니다.
 - 이 SDK는 server SDK입니다. `ProjectAPIToken`을 받으며 브라우저/모바일 번들에서 사용하면 안 됩니다.
 - 첫 범위는 `client.Delivery.EmailVerifications.Create/Confirm`입니다.
+- `Create`는 server-to-server 기본 경로로 direct body (`Subject`, `Text`, optional `HTML`, optional
+  `Metadata`)를 지원합니다. `TemplateID`와 optional `TemplateVersion`은 저장·게시된 template을
+  재사용하는 고급 경로입니다.
+- direct body와 template mode는 상호 배타적입니다. SDK는 mixed mode를 `VALIDATION_ERROR`로 먼저
+  막고, Delivery API도 `422`로 검증합니다.
+- direct body는 Project API Token server grant에서만 지원합니다. app-user
+  `email.verification.send` token은 template 기반 verification 경계에 남습니다.
 - `client.EmailVerifications`는 짧은 alias로 유지하지만 문서 예시는 `client.Delivery.EmailVerifications`를 기본으로 사용합니다.
 - 기본 endpoint는 `https://delivery.spectra.kr`이며, local/internal Docker network용 `BaseURL` override를 허용합니다.
 - `Create`는 `Idempotency-Key`를 사용합니다. 사용자가 주입하지 않으면 SDK가 `sdk:<random>` 형식으로 자동 생성합니다.
@@ -27,6 +34,8 @@
 - Project API Token bearer Authorization
 - Email verification create/confirm
 - 기본 `Method=code`, 기본 `ExpiresInSeconds=600`
+- direct `Subject`/`Text`/optional `HTML`/optional `Metadata` request encoding
+- template `TemplateID`/optional `TemplateVersion` request encoding
 - code/link 입력 검증
 - idempotency key 자동 생성 및 제약 검증
 - API error envelope parsing
@@ -65,3 +74,5 @@
 - Project API Token 원문을 README, WORKLOG, test fixture, log에 남기지 않습니다.
 - browser/mobile SDK에 Project API Token을 넣는 방향으로 안내하지 않습니다.
 - Delivery API는 현재 템플릿 또는 verification 리소스 미존재를 `EMAIL_RESOURCE_NOT_FOUND`로 반환합니다. 템플릿 발행 충돌은 운영 템플릿 API의 `EMAIL_TEMPLATE_PUBLISH_CONFLICT`이며, 일반 email verification create/confirm 흐름의 not published 의미와 1:1로 분리되어 있지는 않습니다.
+- direct body placeholder render, SMTP mailbox 도착, verified sender DNS와 public endpoint E2E는
+  Delivery producer/runtime의 별도 검증 범위입니다. SDK unit test는 요청 contract만 확인합니다.

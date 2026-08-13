@@ -91,6 +91,116 @@ func TestCreateEmailVerificationSendsRequestAndParsesAcceptedResponse(t *testing
 	}
 }
 
+func TestCreateEmailVerificationSendsDirectBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		assertEqual(t, body["recipient_email"], "admin@example.com")
+		assertEqual(t, body["method"], "code")
+		assertEqual(t, body["subject"], "모두의캠프 관리자 로그인 인증 코드")
+		assertEqual(t, body["text"], "인증 코드: {{verification_code}}\n만료: {{expires_at}}")
+		assertEqual(t, body["html"], "<p>인증 코드: <strong>{{verification_code}}</strong></p>")
+		assertEqual(t, body["expires_in_seconds"], float64(600))
+		metadata, ok := body["metadata"].(map[string]any)
+		if !ok {
+			t.Fatalf("metadata type = %T", body["metadata"])
+		}
+		assertEqual(t, metadata["consumer"], "modo-camp")
+		assertEqual(t, metadata["purpose"], "admin_login")
+		for _, field := range []string{"template_id", "template_version", "redirect_uri"} {
+			if _, ok := body[field]; ok {
+				t.Fatalf("%s should be omitted for direct mode", field)
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"data":{"verification_id":"ver_direct","method":"code","status":"pending","expires_at":"2026-08-13T12:00:00Z"}}`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL)
+	challenge, err := client.Delivery.EmailVerifications.Create(context.Background(), CreateEmailVerificationInput{
+		RecipientEmail:   "admin@example.com",
+		Subject:          "모두의캠프 관리자 로그인 인증 코드",
+		Text:             "인증 코드: {{verification_code}}\n만료: {{expires_at}}",
+		HTML:             "<p>인증 코드: <strong>{{verification_code}}</strong></p>",
+		ExpiresInSeconds: 600,
+		Metadata: map[string]string{
+			"consumer": "modo-camp",
+			"purpose":  "admin_login",
+		},
+		IdempotencyKey: "idem_12345678901",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if challenge.VerificationID != "ver_direct" {
+		t.Fatalf("challenge.VerificationID = %q", challenge.VerificationID)
+	}
+}
+
+func TestCreateEmailVerificationValidatesSourceModeWithoutHTTPRequest(t *testing.T) {
+	var requestCount int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL)
+	tests := []struct {
+		name  string
+		input CreateEmailVerificationInput
+	}{
+		{
+			name: "mixed template and direct body",
+			input: CreateEmailVerificationInput{
+				RecipientEmail: "admin@example.com",
+				TemplateID:     "admin-login-code",
+				Subject:        "Login code",
+			},
+		},
+		{
+			name: "template version without template id",
+			input: CreateEmailVerificationInput{
+				RecipientEmail:  "admin@example.com",
+				TemplateVersion: 1,
+			},
+		},
+		{
+			name: "direct body without subject",
+			input: CreateEmailVerificationInput{
+				RecipientEmail: "admin@example.com",
+				Text:           "인증 코드: {{verification_code}}",
+			},
+		},
+		{
+			name: "direct body without text",
+			input: CreateEmailVerificationInput{
+				RecipientEmail: "admin@example.com",
+				Subject:        "로그인 코드",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := client.Delivery.EmailVerifications.Create(context.Background(), tt.input)
+			if err == nil {
+				t.Fatal("Create returned nil error")
+			}
+			if !IsCode(err, CodeValidationError) {
+				t.Fatalf("error code = %v, want %s", err, CodeValidationError)
+			}
+		})
+	}
+	if got := atomic.LoadInt32(&requestCount); got != 0 {
+		t.Fatalf("requestCount = %d, want 0", got)
+	}
+}
+
 func TestCreateEmailVerificationAutoGeneratesIdempotencyKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := r.Header.Get("Idempotency-Key")
