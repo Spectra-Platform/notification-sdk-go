@@ -1,0 +1,309 @@
+package notification
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestCreateEmailVerificationSendsRequestAndParsesAcceptedResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want %s", r.Method, http.MethodPost)
+		}
+		if r.URL.Path != "/platform/v1/projects/project_123/email/verifications" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer token_123" {
+			t.Fatalf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+		if r.Header.Get("Idempotency-Key") != "idem_12345678901" {
+			t.Fatalf("Idempotency-Key = %q", r.Header.Get("Idempotency-Key"))
+		}
+		if r.Header.Get("X-Spectra-Project-Id") != "project_123" {
+			t.Fatalf("X-Spectra-Project-Id = %q", r.Header.Get("X-Spectra-Project-Id"))
+		}
+		if got := r.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+			t.Fatalf("Content-Type = %q", got)
+		}
+		if r.Header.Get("Accept") != "application/json" {
+			t.Fatalf("Accept = %q", r.Header.Get("Accept"))
+		}
+		if r.Header.Get("User-Agent") != "test-agent" {
+			t.Fatalf("User-Agent = %q", r.Header.Get("User-Agent"))
+		}
+
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		assertEqual(t, body["recipient_email"], "user@example.com")
+		assertEqual(t, body["method"], "link")
+		assertEqual(t, body["template_id"], "email-login")
+		assertEqual(t, body["template_version"], float64(1))
+		assertEqual(t, body["redirect_uri"], "https://app.example.com/verify")
+		assertEqual(t, body["expires_in_seconds"], float64(600))
+		metadata, ok := body["metadata"].(map[string]any)
+		if !ok {
+			t.Fatalf("metadata type = %T", body["metadata"])
+		}
+		assertEqual(t, metadata["tenant"], "spectra")
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"data":{"verification_id":"ver_123","method":"link","status":"pending","expires_at":"2026-08-13T12:00:00Z"}}`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL)
+	client.userAgent = "test-agent"
+
+	challenge, err := client.Delivery.EmailVerifications.Create(context.Background(), CreateEmailVerificationInput{
+		RecipientEmail:   "user@example.com",
+		Method:           EmailVerificationMethodLink,
+		TemplateID:       "email-login",
+		TemplateVersion:  1,
+		ExpiresInSeconds: 600,
+		Metadata:         map[string]string{"tenant": "spectra"},
+		RedirectURI:      "https://app.example.com/verify",
+		IdempotencyKey:   "idem_12345678901",
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if challenge.VerificationID != "ver_123" {
+		t.Fatalf("challenge.VerificationID = %q", challenge.VerificationID)
+	}
+	if challenge.Status != "pending" {
+		t.Fatalf("challenge.Status = %q", challenge.Status)
+	}
+	if challenge.Method != EmailVerificationMethodLink {
+		t.Fatalf("challenge.Method = %q", challenge.Method)
+	}
+	if challenge.ExpiresAt.IsZero() {
+		t.Fatal("challenge.ExpiresAt is zero")
+	}
+}
+
+func TestCreateEmailVerificationAutoGeneratesIdempotencyKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := r.Header.Get("Idempotency-Key")
+		if key == "" {
+			t.Fatal("Idempotency-Key is empty")
+		}
+		if len(key) != 36 {
+			t.Fatalf("Idempotency-Key length = %d, want 36", len(key))
+		}
+		if !strings.HasPrefix(key, "sdk:") {
+			t.Fatalf("Idempotency-Key = %q, want sdk prefix", key)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		assertEqual(t, body["method"], "code")
+		assertEqual(t, body["expires_in_seconds"], float64(600))
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"data":{"verification_id":"ver_auto","method":"code","status":"pending","expires_at":"2026-08-13T12:00:00Z"}}`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL)
+	if _, err := client.EmailVerifications.Create(context.Background(), CreateEmailVerificationInput{
+		RecipientEmail: "user@example.com",
+		TemplateID:     "email-login",
+	}); err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+}
+
+func TestConfirmEmailVerificationSendsRequestAndParsesOKResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want %s", r.Method, http.MethodPost)
+		}
+		if r.URL.Path != "/platform/v1/projects/project_123/email/verifications/ver_123/confirmations" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer token_123" {
+			t.Fatalf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		assertEqual(t, body["code"], "123456")
+		if _, ok := body["link_token"]; ok {
+			t.Fatalf("link_token should be omitted when Code is used")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":{"verification_id":"ver_123","status":"verified","verified_at":"2026-08-13T12:01:00Z"}}`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL)
+	proof, err := client.EmailVerifications.Confirm(context.Background(), ConfirmEmailVerificationInput{
+		VerificationID: "ver_123",
+		Code:           "123456",
+	})
+	if err != nil {
+		t.Fatalf("Confirm returned error: %v", err)
+	}
+	if proof.VerificationID != "ver_123" {
+		t.Fatalf("proof.VerificationID = %q", proof.VerificationID)
+	}
+	if proof.VerifiedAt == nil || proof.VerifiedAt.IsZero() {
+		t.Fatalf("proof.VerifiedAt = %v", proof.VerifiedAt)
+	}
+}
+
+func TestConfirmEmailVerificationValidatesExactlyOneSecretWithoutHTTPRequest(t *testing.T) {
+	var requestCount int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL)
+	_, err := client.EmailVerifications.Confirm(context.Background(), ConfirmEmailVerificationInput{
+		VerificationID: "ver_123",
+		Code:           "123456",
+		LinkToken:      "link_token_123",
+	})
+	if err == nil {
+		t.Fatal("Confirm returned nil error")
+	}
+
+	var sdkError *Error
+	if !errors.As(err, &sdkError) {
+		t.Fatalf("error type = %T, want *Error", err)
+	}
+	if sdkError.Code != CodeValidationError {
+		t.Fatalf("sdkError.Code = %q", sdkError.Code)
+	}
+	if got := atomic.LoadInt32(&requestCount); got != 0 {
+		t.Fatalf("requestCount = %d, want 0", got)
+	}
+}
+
+func TestRateLimitErrorParsesRetryAfterAndRequestID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "7")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"code":"RATE_LIMITED","message":"too many requests","request_id":"req_123"}}`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL)
+	_, err := client.EmailVerifications.Create(context.Background(), CreateEmailVerificationInput{
+		RecipientEmail:   "user@example.com",
+		Method:           EmailVerificationMethodCode,
+		TemplateID:       "email-login",
+		ExpiresInSeconds: 600,
+		IdempotencyKey:   "idem_12345678901",
+	})
+	if err == nil {
+		t.Fatal("Create returned nil error")
+	}
+
+	var sdkError *Error
+	if !errors.As(err, &sdkError) {
+		t.Fatalf("error type = %T, want *Error", err)
+	}
+	if sdkError.Code != "RATE_LIMITED" {
+		t.Fatalf("sdkError.Code = %q", sdkError.Code)
+	}
+	if sdkError.Message != "too many requests" {
+		t.Fatalf("sdkError.Message = %q", sdkError.Message)
+	}
+	if sdkError.HTTPStatus != http.StatusTooManyRequests {
+		t.Fatalf("sdkError.HTTPStatus = %d", sdkError.HTTPStatus)
+	}
+	if sdkError.RequestID != "req_123" {
+		t.Fatalf("sdkError.RequestID = %q", sdkError.RequestID)
+	}
+	if sdkError.RetryAfter != 7*time.Second {
+		t.Fatalf("sdkError.RetryAfter = %s", sdkError.RetryAfter)
+	}
+}
+
+func TestMalformedResponseReturnsMalformedResponseError(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "invalid json", body: `{"data":`},
+		{name: "missing data", body: `{}`},
+		{name: "null data", body: `{"data":null}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			client := newTestClient(t, server.URL)
+			_, err := client.EmailVerifications.Create(context.Background(), CreateEmailVerificationInput{
+				RecipientEmail:   "user@example.com",
+				Method:           EmailVerificationMethodCode,
+				TemplateID:       "email-login",
+				ExpiresInSeconds: 600,
+				IdempotencyKey:   "idem_12345678901",
+			})
+			if err == nil {
+				t.Fatal("Create returned nil error")
+			}
+
+			var sdkError *Error
+			if !errors.As(err, &sdkError) {
+				t.Fatalf("error type = %T, want *Error", err)
+			}
+			if sdkError.Code != CodeMalformedResponse {
+				t.Fatalf("sdkError.Code = %q", sdkError.Code)
+			}
+			if sdkError.HTTPStatus != http.StatusAccepted {
+				t.Fatalf("sdkError.HTTPStatus = %d", sdkError.HTTPStatus)
+			}
+		})
+	}
+}
+
+func newTestClient(t *testing.T, baseURL string) *Client {
+	t.Helper()
+
+	client, err := NewClient(Config{
+		ProjectID:       "project_123",
+		ProjectAPIToken: "token_123",
+		Environment:     EnvironmentTest,
+		BaseURL:         baseURL,
+	})
+	if err != nil {
+		t.Fatalf("NewClient returned error: %v", err)
+	}
+
+	return client
+}
+
+func assertEqual(t *testing.T, got any, want any) {
+	t.Helper()
+
+	if got != want {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
