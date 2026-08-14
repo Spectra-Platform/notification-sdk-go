@@ -28,7 +28,10 @@ const (
 )
 
 type Config struct {
-	ProjectID       string
+	ProjectID string
+	// ServerAPIKey is a server-side key with the Email feature enabled.
+	ServerAPIKey string
+	// ProjectAPIToken is a legacy alias for ServerAPIKey. If both are set, they must match.
 	ProjectAPIToken string
 	Environment     Environment
 	BaseURL         string
@@ -38,12 +41,12 @@ type Config struct {
 }
 
 type Client struct {
-	projectID       string
-	projectAPIToken string
-	environment     Environment
-	baseURL         string
-	httpClient      *http.Client
-	userAgent       string
+	projectID    string
+	serverAPIKey string
+	environment  Environment
+	baseURL      string
+	httpClient   *http.Client
+	userAgent    string
 
 	Email              *EmailService
 	Delivery           *DeliveryService
@@ -60,9 +63,16 @@ func NewClient(config Config) (*Client, error) {
 		return nil, newValidationError("ProjectID is required")
 	}
 
+	serverAPIKey := strings.TrimSpace(config.ServerAPIKey)
 	projectAPIToken := strings.TrimSpace(config.ProjectAPIToken)
-	if projectAPIToken == "" {
-		return nil, newValidationError("ProjectAPIToken is required")
+	if serverAPIKey == "" {
+		serverAPIKey = projectAPIToken
+	}
+	if serverAPIKey == "" {
+		return nil, newValidationError("ServerAPIKey is required")
+	}
+	if projectAPIToken != "" && serverAPIKey != projectAPIToken {
+		return nil, newValidationError("ServerAPIKey and ProjectAPIToken must match when both are set")
 	}
 
 	environment := config.Environment
@@ -98,12 +108,12 @@ func NewClient(config Config) (*Client, error) {
 	}
 
 	client := &Client{
-		projectID:       projectID,
-		projectAPIToken: projectAPIToken,
-		environment:     environment,
-		baseURL:         baseURL,
-		httpClient:      httpClient,
-		userAgent:       userAgent,
+		projectID:    projectID,
+		serverAPIKey: serverAPIKey,
+		environment:  environment,
+		baseURL:      baseURL,
+		httpClient:   httpClient,
+		userAgent:    userAgent,
 	}
 	emailVerifications := &EmailVerificationService{client: client}
 	client.Email = &EmailService{client: client, Verifications: emailVerifications}
@@ -143,7 +153,7 @@ func (c *Client) doJSON(ctx context.Context, method string, requestURL string, i
 		}
 	}
 
-	req.Header.Set("Authorization", "Bearer "+c.projectAPIToken)
+	req.Header.Set("Authorization", "Bearer "+c.serverAPIKey)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Spectra-Project-Id", c.projectID)

@@ -1,5 +1,20 @@
 # notification-sdk-go WORKLOG
 
+## 2026-08-14 — Server API Key alias for Email Go SDK
+
+- 목적: Console/Auth가 기능별 token preset 대신 하나의 Server API Key에 기능을 포함하는 구조로 바뀌는 데 맞춰 Go server SDK의 기본 설정명과 문서 용어를 정리.
+- 결과: `Config.ServerAPIKey`를 기본 credential field로 추가하고, 기존 `Config.ProjectAPIToken`은 legacy alias로 유지했다. 두 값이 모두 주어졌는데 다르면 SDK가 HTTP 요청 전에 `VALIDATION_ERROR`를 반환한다.
+- 주요 변경:
+  - `client.go`
+  - `client_test.go`
+  - `README.md`
+  - `HANDOFF.md`
+  - `docs/work-logs/2026-08-14-02-server-api-key-alias.md`
+- 검증:
+  - `gofmt -w client.go client_test.go`, `go test ./...`, `go vet ./...`, `go build ./...`, `git diff --check` 통과
+- 미검증:
+  - 실제 `delivery.spectra.kr` public E2E, 실제 Server API Key 발급/검증 runtime, 모두의캠프 backend 적용
+
 ## 2026-08-14 — Basic Email Go SDK surface
 
 - 목적: Go server SDK 기본 UX를 서버 내부 Delivery 구조와 template 선행 생성 중심에서, 보내기/인증 코드 발송처럼 소비자가 하려는 일 중심으로 단순화.

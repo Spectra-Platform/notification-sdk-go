@@ -6,15 +6,16 @@
 
 `notification-sdk-go`는 Go backend에서 Spectra Email/Notification 기능을 server-to-server로 호출하기 위한 Go SDK입니다.
 
-첫 공개 범위는 Project token 기반 단건 Email 발송과 Email Verification create/confirm입니다. 모두캠프 관리자 이메일 로그인처럼 로그인 전(pre-auth) 상태에서 브라우저 Notification SDK를 사용할 수 없고, Project API Token을 서버에만 보관해야 하는 경우를 대상으로 합니다.
+첫 공개 범위는 Email 기능이 포함된 Server API Key 기반 단건 Email 발송과 Email Verification create/confirm입니다. 모두캠프 관리자 이메일 로그인처럼 로그인 전(pre-auth) 상태에서 브라우저 Notification SDK를 사용할 수 없고, Server API Key를 서버에만 보관해야 하는 경우를 대상으로 합니다.
 
 ## 확정된 결정
 
 - Go SDK는 JS browser SDK와 public API를 그대로 복사하지 않습니다.
 - 제품 용어와 오류 의미는 JS Notification SDK/Delivery 계약과 맞추되, Go답게 `context.Context`, typed struct, typed error, `http.Client`, timeout, base URL override를 제공합니다.
-- 이 SDK는 server SDK입니다. `ProjectAPIToken`을 받으며 브라우저/모바일 번들에서 사용하면 안 됩니다.
+- 이 SDK는 server SDK입니다. 새 코드에서는 `Config.ServerAPIKey`를 사용하며 브라우저/모바일 번들에서 사용하면 안 됩니다.
+- `Config.ProjectAPIToken`은 이전 Go SDK 사용자를 위한 legacy alias입니다. `ServerAPIKey`와 `ProjectAPIToken`을 둘 다 지정하면 값이 같아야 하며, 다르면 SDK가 `VALIDATION_ERROR`를 반환합니다.
 - 기본 public surface는 `client.Email.Send`와 `client.Email.Verifications.SendCode/SendLink/ConfirmCode/ConfirmLink`입니다.
-- `client.Email.Send`는 Project token 단건 Email enqueue endpoint를 호출하며 `To`, `Subject`,
+- `client.Email.Send`는 Server API Key 단건 Email enqueue endpoint를 호출하며 `To`, `Subject`,
   `Text`, optional `HTML`, optional `Metadata`를 받습니다. 보내는 사람은 per-request 입력이 아니라
   Delivery Project sender 설정과 environment 정책으로 결정됩니다.
 - Email Verification 기본 wrapper는 direct body (`Subject`, `Text`, optional `HTML`, optional
@@ -22,8 +23,8 @@
   재사용하는 advanced/legacy 경로입니다.
 - direct body와 template mode는 상호 배타적입니다. SDK는 mixed mode를 `VALIDATION_ERROR`로 먼저
   막고, Delivery API도 `422`로 검증합니다.
-- direct body는 Project API Token server grant에서만 지원합니다. app-user
-  `email.verification.send` token은 template 기반 verification 경계에 남습니다.
+- direct body는 Server API Key server grant에서만 지원합니다. browser/mobile app-user flow가
+  Email verification을 노출하는 경우에는 별도 소비자 권한 경계와 template 기반 흐름을 따라야 합니다.
 - `client.EmailVerifications`와 `client.Delivery.EmailVerifications`는 기존 호환 surface로 유지하지만 문서 기본 예시는 `client.Email`을 사용합니다.
 - 기본 endpoint는 `https://delivery.spectra.kr`이며, 일반 기본 플로우에서는 URL 환경 변수를 요구하지 않습니다. local/internal Docker network용 `BaseURL` override는 advanced configuration으로만 안내합니다.
 - `Create`는 `Idempotency-Key`를 사용합니다. 사용자가 주입하지 않으면 SDK가 `sdk:<random>` 형식으로 자동 생성합니다.
@@ -35,8 +36,9 @@
 
 - Go module: `github.com/Spectra-Platform/notification-sdk-go`
 - `notification.NewClient(notification.Config{...})`
-- Project API Token bearer Authorization
-- Project token 단건 Email send: `client.Email.Send`
+- Server API Key bearer Authorization
+- legacy config alias: `Config.ProjectAPIToken`
+- Server API Key 단건 Email send: `client.Email.Send`
 - Email verification create/confirm
 - Email verification 기본 wrapper: `SendCode`, `SendLink`, `ConfirmCode`, `ConfirmLink`
 - 기본 `Method=code`, 기본 `ExpiresInSeconds=600`
@@ -63,25 +65,25 @@
   - `POST /platform/v1/projects/{project_id}/email/delivery-requests`
   - `POST /platform/v1/projects/{project_id}/email/verifications`
   - `POST /platform/v1/projects/{project_id}/email/verifications/{verification_id}/confirmations`
-- Project API Token:
-  - audience: `email`
-  - scope: 단건 Email 발송은 `email.send`, Email verification은 `email.verification.send`
-  - token project와 path project가 일치해야 합니다.
-- environment는 Project API Token introspection 결과에 의해 결정됩니다. SDK의 `Environment`는 소비자 설정 구분과 향후 endpoint 선택을 위한 값이며 현재 request body에 보내지 않습니다.
+- Server API Key:
+  - Console/Auth에서 Email 기능을 포함해 발급한 서버 전용 key를 사용합니다.
+  - 단건 Email 발송과 Email verification 기능이 key에 포함되어 있어야 합니다.
+  - key project와 path project가 일치해야 합니다.
+- environment는 Server API Key 검증 결과에 의해 결정됩니다. SDK의 `Environment`는 소비자 설정 구분과 향후 endpoint 선택을 위한 값이며 현재 request body에 보내지 않습니다.
 
 ## 변경 시 함께 확인할 계약
 
 - `delivery-platform` email verification request/response/error contract
 - `delivery-platform` project Email delivery request/response/error contract
-- `auth-platform` Project API Token introspection and audience/scope contract
+- `auth-platform` Server API Key validation and capability contract
 - `platform-docs` server SDK 문서
 - JS Notification SDK와 오류 의미 alignment
 - 모두캠프 Go backend adapter 적용 방식
 
 ## 주의사항
 
-- Project API Token 원문을 README, WORKLOG, test fixture, log에 남기지 않습니다.
-- browser/mobile SDK에 Project API Token을 넣는 방향으로 안내하지 않습니다.
+- Server API Key 원문을 README, WORKLOG, test fixture, log에 남기지 않습니다.
+- browser/mobile SDK에 Server API Key나 legacy Project API token을 넣는 방향으로 안내하지 않습니다.
 - Delivery API는 현재 템플릿 또는 verification 리소스 미존재를 `EMAIL_RESOURCE_NOT_FOUND`로 반환합니다. 템플릿 발행 충돌은 운영 템플릿 API의 `EMAIL_TEMPLATE_PUBLISH_CONFLICT`이며, 일반 email verification create/confirm 흐름의 not published 의미와 1:1로 분리되어 있지는 않습니다.
 - direct body placeholder render, SMTP mailbox 도착, verified sender DNS와 public endpoint E2E는
   Delivery producer/runtime의 별도 검증 범위입니다. SDK unit test는 요청 contract만 확인합니다.

@@ -12,6 +12,86 @@ import (
 	"time"
 )
 
+func TestNewClientValidatesServerAPIKeyAliases(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      Config
+		wantKey     string
+		wantMessage string
+	}{
+		{
+			name: "server api key",
+			config: Config{
+				ProjectID:    "project_123",
+				ServerAPIKey: "key_123",
+			},
+			wantKey: "key_123",
+		},
+		{
+			name: "legacy project api token",
+			config: Config{
+				ProjectID:       "project_123",
+				ProjectAPIToken: "legacy_key_123",
+			},
+			wantKey: "legacy_key_123",
+		},
+		{
+			name: "matching aliases",
+			config: Config{
+				ProjectID:       "project_123",
+				ServerAPIKey:    " key_123 ",
+				ProjectAPIToken: "key_123",
+			},
+			wantKey: "key_123",
+		},
+		{
+			name: "missing server api key",
+			config: Config{
+				ProjectID: "project_123",
+			},
+			wantMessage: "ServerAPIKey is required",
+		},
+		{
+			name: "conflicting aliases",
+			config: Config{
+				ProjectID:       "project_123",
+				ServerAPIKey:    "key_123",
+				ProjectAPIToken: "other_key_123",
+			},
+			wantMessage: "ServerAPIKey and ProjectAPIToken must match when both are set",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, err := NewClient(tt.config)
+			if tt.wantMessage == "" {
+				if err != nil {
+					t.Fatalf("NewClient returned error: %v", err)
+				}
+				if client.serverAPIKey != tt.wantKey {
+					t.Fatalf("client.serverAPIKey = %q, want %q", client.serverAPIKey, tt.wantKey)
+				}
+				return
+			}
+
+			if err == nil {
+				t.Fatal("NewClient returned nil error")
+			}
+			var sdkError *Error
+			if !errors.As(err, &sdkError) {
+				t.Fatalf("error type = %T, want *Error", err)
+			}
+			if sdkError.Code != CodeValidationError {
+				t.Fatalf("sdkError.Code = %q, want %s", sdkError.Code, CodeValidationError)
+			}
+			if sdkError.Message != tt.wantMessage {
+				t.Fatalf("sdkError.Message = %q, want %q", sdkError.Message, tt.wantMessage)
+			}
+		})
+	}
+}
+
 func TestCreateEmailVerificationSendsRequestAndParsesAcceptedResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -490,10 +570,10 @@ func newTestClient(t *testing.T, baseURL string) *Client {
 	t.Helper()
 
 	client, err := NewClient(Config{
-		ProjectID:       "project_123",
-		ProjectAPIToken: "token_123",
-		Environment:     EnvironmentTest,
-		BaseURL:         baseURL,
+		ProjectID:    "project_123",
+		ServerAPIKey: "token_123",
+		Environment:  EnvironmentTest,
+		BaseURL:      baseURL,
 	})
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)
