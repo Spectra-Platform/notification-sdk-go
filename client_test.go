@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func TestNewClientValidatesServerAPIKeyAliases(t *testing.T) {
+func TestNewClientValidatesSecretKeyAliases(t *testing.T) {
 	tests := []struct {
 		name        string
 		config      Config
@@ -20,7 +20,15 @@ func TestNewClientValidatesServerAPIKeyAliases(t *testing.T) {
 		wantMessage string
 	}{
 		{
-			name: "server api key",
+			name: "secret key",
+			config: Config{
+				ProjectID: "project_123",
+				SecretKey: "key_123",
+			},
+			wantKey: "key_123",
+		},
+		{
+			name: "legacy server api key",
 			config: Config{
 				ProjectID:    "project_123",
 				ServerAPIKey: "key_123",
@@ -39,26 +47,37 @@ func TestNewClientValidatesServerAPIKeyAliases(t *testing.T) {
 			name: "matching aliases",
 			config: Config{
 				ProjectID:       "project_123",
-				ServerAPIKey:    " key_123 ",
+				SecretKey:       " key_123 ",
+				ServerAPIKey:    "key_123",
 				ProjectAPIToken: "key_123",
 			},
 			wantKey: "key_123",
 		},
 		{
-			name: "missing server api key",
+			name: "missing secret key",
 			config: Config{
 				ProjectID: "project_123",
 			},
-			wantMessage: "ServerAPIKey is required",
+			wantMessage: "SecretKey is required",
 		},
 		{
-			name: "conflicting aliases",
+			name: "conflicting secret key aliases",
+			config: Config{
+				ProjectID:       "project_123",
+				SecretKey:       "key_123",
+				ServerAPIKey:    "other_key_123",
+				ProjectAPIToken: "key_123",
+			},
+			wantMessage: "SecretKey and legacy credential aliases must match when more than one is set",
+		},
+		{
+			name: "conflicting legacy aliases",
 			config: Config{
 				ProjectID:       "project_123",
 				ServerAPIKey:    "key_123",
 				ProjectAPIToken: "other_key_123",
 			},
-			wantMessage: "ServerAPIKey and ProjectAPIToken must match when both are set",
+			wantMessage: "SecretKey and legacy credential aliases must match when more than one is set",
 		},
 	}
 
@@ -69,8 +88,8 @@ func TestNewClientValidatesServerAPIKeyAliases(t *testing.T) {
 				if err != nil {
 					t.Fatalf("NewClient returned error: %v", err)
 				}
-				if client.serverAPIKey != tt.wantKey {
-					t.Fatalf("client.serverAPIKey = %q, want %q", client.serverAPIKey, tt.wantKey)
+				if client.secretKey != tt.wantKey {
+					t.Fatalf("client.secretKey = %q, want %q", client.secretKey, tt.wantKey)
 				}
 				return
 			}
@@ -570,10 +589,10 @@ func newTestClient(t *testing.T, baseURL string) *Client {
 	t.Helper()
 
 	client, err := NewClient(Config{
-		ProjectID:    "project_123",
-		ServerAPIKey: "token_123",
-		Environment:  EnvironmentTest,
-		BaseURL:      baseURL,
+		ProjectID:   "project_123",
+		SecretKey:   "token_123",
+		Environment: EnvironmentTest,
+		BaseURL:     baseURL,
 	})
 	if err != nil {
 		t.Fatalf("NewClient returned error: %v", err)

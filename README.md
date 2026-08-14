@@ -2,7 +2,7 @@
 
 Go backend에서 Spectra Email/Notification 기능을 server-to-server로 호출하기 위한 SDK입니다.
 
-기본 사용은 단순한 Email 작업부터 시작합니다. Console/Auth에서 Email 기능을 포함해 발급한 Server API Key는 서버에만 보관하고, SDK는 기본 Delivery endpoint를 자동으로 사용합니다.
+기본 사용은 단순한 Email 작업부터 시작합니다. Console/Auth에서 발급한 프로젝트 Secret Key는 서버에만 보관하고, SDK는 기본 Delivery endpoint를 자동으로 사용합니다.
 
 ## 설치
 
@@ -17,17 +17,17 @@ import notification "github.com/Spectra-Platform/notification-sdk-go"
 ## 보안 경계
 
 - 이 SDK는 Go 서버 전용입니다.
-- `ServerAPIKey`는 서버 환경 변수나 secret manager에만 저장합니다.
-- 브라우저, 모바일 앱, 프론트엔드 번들에는 Server API Key나 legacy Project API token을 넣지 않습니다.
+- `SecretKey`는 서버 환경 변수나 secret manager에만 저장합니다.
+- 브라우저, 모바일 앱, 프론트엔드 번들에는 Secret Key나 provider credential을 넣지 않습니다.
 - 사용자 앱의 자체 로그인 세션은 앱 백엔드가 별도로 발급해도 됩니다. 이 SDK는 Spectra Email/Notification 호출만 담당합니다.
 
 ## 클라이언트 생성
 
 ```go
 client, err := notification.NewClient(notification.Config{
-    ProjectID:    projectID,
-    ServerAPIKey: serverAPIKey,
-    Environment:  notification.EnvironmentTest,
+    ProjectID:   projectID,
+    SecretKey:   secretKey,
+    Environment: notification.EnvironmentTest,
 })
 if err != nil {
     // config validation error
@@ -137,7 +137,7 @@ if err != nil {
 | `EMAIL_VERIFICATION_LOCKED` | 시도 횟수 초과 등으로 잠김 |
 | `DELIVERY_RATE_LIMITED` | 발송 또는 확인 rate limit |
 | `DELIVERY_QUEUE_UNAVAILABLE` | Delivery queue가 일시적으로 요청을 받을 수 없음 |
-| `PROJECT_TOKEN_UNAUTHORIZED` | Server API Key 누락, 만료, 폐기, Email 기능 미포함, project mismatch |
+| `PROJECT_TOKEN_UNAUTHORIZED` | Secret Key 누락, 만료, 폐기 또는 project mismatch |
 | `EMAIL_RESOURCE_NOT_FOUND` | 템플릿 또는 이메일 인증 리소스를 찾을 수 없음 |
 | `EMAIL_TEMPLATE_PUBLISH_CONFLICT` | 템플릿 발행 충돌. 일반 발송/확인 호출보다 운영 템플릿 API에서 주로 발생 |
 | `AUTH_INTROSPECTION_UNAVAILABLE` | Auth introspection 일시 불가 |
@@ -157,11 +157,11 @@ if err != nil {
 
 ```go
 client, err := notification.NewClient(notification.Config{
-    ProjectID:    projectID,
-    ServerAPIKey: serverAPIKey,
-    Environment:  notification.EnvironmentTest,
-    BaseURL:      "http://delivery-api:8080",
-    Timeout:      5 * time.Second,
+    ProjectID:   projectID,
+    SecretKey:   secretKey,
+    Environment: notification.EnvironmentTest,
+    BaseURL:     "http://delivery-api:8080",
+    Timeout:     5 * time.Second,
 })
 ```
 
@@ -169,24 +169,24 @@ client, err := notification.NewClient(notification.Config{
 
 ```go
 client, err := notification.NewClient(notification.Config{
-    ProjectID:    projectID,
-    ServerAPIKey: serverAPIKey,
-    HTTPClient:   myHTTPClient,
+    ProjectID:   projectID,
+    SecretKey:   secretKey,
+    HTTPClient:  myHTTPClient,
 })
 ```
 
-## 고급/legacy credential alias
+## 고급/deprecated credential alias
 
-새 코드에서는 `Config.ServerAPIKey`를 사용하세요. 이전 버전의 `Config.ProjectAPIToken`은 호환을 위한 legacy alias로 유지됩니다.
+새 코드에서는 `Config.SecretKey`를 사용하세요. 이전 버전의 `Config.ServerAPIKey`와 `Config.ProjectAPIToken`은 호환을 위한 deprecated alias로 유지됩니다.
 
 ```go
 client, err := notification.NewClient(notification.Config{
-    ProjectID:       projectID,
-    ProjectAPIToken: legacyProjectAPIToken,
+    ProjectID:    projectID,
+    ServerAPIKey: legacyCredential,
 })
 ```
 
-`ServerAPIKey`와 `ProjectAPIToken`을 둘 다 넘기면 두 값은 같아야 합니다. 다르면 SDK가 HTTP 요청을 보내기 전에 `VALIDATION_ERROR`를 반환합니다.
+credential 필드를 둘 이상 넘기면 값은 모두 같아야 합니다. 다르면 SDK가 HTTP 요청을 보내기 전에 `VALIDATION_ERROR`를 반환합니다.
 
 ## 고급/legacy template mode
 
@@ -212,7 +212,7 @@ direct body 필드(`Subject`, `Text`, `HTML`)와 `TemplateID`는 함께 지정�
 구현됨:
 
 - Go server SDK client
-- Email 기능이 포함된 Server API Key 기반 Authorization
+- Secret Key 기반 Authorization
 - 기본 public surface: `client.Email.Send`
 - Email verification wrapper: `client.Email.Verifications.SendCode/SendLink/ConfirmCode/ConfirmLink`
 - 기존 호환 surface: `client.EmailVerifications.Create/Confirm`, `client.Delivery.EmailVerifications.Create/Confirm`

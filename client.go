@@ -17,7 +17,7 @@ const (
 	DefaultBaseURL = "https://delivery.spectra.kr"
 
 	defaultTimeout   = 10 * time.Second
-	defaultUserAgent = "spectra-notification-go/0.1.2"
+	defaultUserAgent = "spectra-notification-go/0.1.3"
 )
 
 type Environment string
@@ -29,9 +29,11 @@ const (
 
 type Config struct {
 	ProjectID string
-	// ServerAPIKey is a server-side key with the Email feature enabled.
+	// SecretKey is the server-side project Secret Key.
+	SecretKey string
+	// ServerAPIKey is a deprecated alias for SecretKey. If multiple credential fields are set, they must match.
 	ServerAPIKey string
-	// ProjectAPIToken is a legacy alias for ServerAPIKey. If both are set, they must match.
+	// ProjectAPIToken is a legacy alias for SecretKey. If multiple credential fields are set, they must match.
 	ProjectAPIToken string
 	Environment     Environment
 	BaseURL         string
@@ -41,12 +43,12 @@ type Config struct {
 }
 
 type Client struct {
-	projectID    string
-	serverAPIKey string
-	environment  Environment
-	baseURL      string
-	httpClient   *http.Client
-	userAgent    string
+	projectID   string
+	secretKey   string
+	environment Environment
+	baseURL     string
+	httpClient  *http.Client
+	userAgent   string
 
 	Email              *EmailService
 	Delivery           *DeliveryService
@@ -63,16 +65,23 @@ func NewClient(config Config) (*Client, error) {
 		return nil, newValidationError("ProjectID is required")
 	}
 
+	secretKey := strings.TrimSpace(config.SecretKey)
 	serverAPIKey := strings.TrimSpace(config.ServerAPIKey)
 	projectAPIToken := strings.TrimSpace(config.ProjectAPIToken)
-	if serverAPIKey == "" {
-		serverAPIKey = projectAPIToken
+	if secretKey == "" {
+		secretKey = serverAPIKey
 	}
-	if serverAPIKey == "" {
-		return nil, newValidationError("ServerAPIKey is required")
+	if secretKey == "" {
+		secretKey = projectAPIToken
 	}
-	if projectAPIToken != "" && serverAPIKey != projectAPIToken {
-		return nil, newValidationError("ServerAPIKey and ProjectAPIToken must match when both are set")
+	if secretKey == "" {
+		return nil, newValidationError("SecretKey is required")
+	}
+	if serverAPIKey != "" && secretKey != serverAPIKey {
+		return nil, newValidationError("SecretKey and legacy credential aliases must match when more than one is set")
+	}
+	if projectAPIToken != "" && secretKey != projectAPIToken {
+		return nil, newValidationError("SecretKey and legacy credential aliases must match when more than one is set")
 	}
 
 	environment := config.Environment
@@ -108,12 +117,12 @@ func NewClient(config Config) (*Client, error) {
 	}
 
 	client := &Client{
-		projectID:    projectID,
-		serverAPIKey: serverAPIKey,
-		environment:  environment,
-		baseURL:      baseURL,
-		httpClient:   httpClient,
-		userAgent:    userAgent,
+		projectID:   projectID,
+		secretKey:   secretKey,
+		environment: environment,
+		baseURL:     baseURL,
+		httpClient:  httpClient,
+		userAgent:   userAgent,
 	}
 	emailVerifications := &EmailVerificationService{client: client}
 	client.Email = &EmailService{client: client, Verifications: emailVerifications}
@@ -153,7 +162,7 @@ func (c *Client) doJSON(ctx context.Context, method string, requestURL string, i
 		}
 	}
 
-	req.Header.Set("Authorization", "Bearer "+c.serverAPIKey)
+	req.Header.Set("Authorization", "Bearer "+c.secretKey)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Spectra-Project-Id", c.projectID)

@@ -1,5 +1,21 @@
 # notification-sdk-go WORKLOG
 
+## 2026-08-14 — Secret Key credential surface
+
+- 목적: 사용자-facing credential 명칭을 `Secret Key`로 확정한 방향에 맞춰 Go server SDK의 새 public config와 README 기본 예시를 정리.
+- 결과: `Config.SecretKey`를 기본 credential field로 추가하고, 기존 `Config.ServerAPIKey`/`Config.ProjectAPIToken`은 deprecated alias로 유지했다. 여러 credential field가 동시에 주어지면 값이 모두 같아야 하며, 다르면 SDK가 HTTP 요청 전 `VALIDATION_ERROR`를 반환한다.
+- 주요 변경:
+  - `client.go`
+  - `client_test.go`
+  - `README.md`
+  - `HANDOFF.md`
+  - `docs/work-logs/2026-08-14-03-secret-key-credential-surface.md`
+- 검증:
+  - `gofmt -w client.go client_test.go`, `go test ./...`, `go vet ./...`, `go build ./...`, `git diff --check` 통과
+  - README/HANDOFF/client/test 범위 legacy exact phrase grep에서 기본 사용자-facing 문구는 제거됐고 deprecated alias 문맥만 남음
+- 미검증:
+  - 실제 `delivery.spectra.kr` public E2E, 실제 Secret Key 발급/재발급 runtime, 모두의캠프 backend 적용
+
 ## 2026-08-14 — Server API Key alias for Email Go SDK
 
 - 목적: Console/Auth가 기능별 token preset 대신 하나의 Server API Key에 기능을 포함하는 구조로 바뀌는 데 맞춰 Go server SDK의 기본 설정명과 문서 용어를 정리.
