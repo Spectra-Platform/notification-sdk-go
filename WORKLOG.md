@@ -1,5 +1,22 @@
 # notification-sdk-go WORKLOG
 
+## 2026-08-14 — Basic Email Go SDK surface
+
+- 목적: Go server SDK 기본 UX를 서버 내부 Delivery 구조와 template 선행 생성 중심에서, 보내기/인증 코드 발송처럼 소비자가 하려는 일 중심으로 단순화.
+- 결과: `client.Email.Send`와 `client.Email.Verifications.SendCode/SendLink/ConfirmCode/ConfirmLink`를 추가하고, README 기본 플로우에서 base URL override와 template mode를 advanced/legacy로 이동했다.
+- 주요 변경:
+  - `client.go`
+  - `email.go`
+  - `email_verifications.go`
+  - `client_test.go`
+  - `README.md`
+  - `HANDOFF.md`
+  - `docs/work-logs/2026-08-14-01-basic-email-go-sdk-surface.md`
+- 검증:
+  - `gofmt -w client.go email.go email_verifications.go client_test.go`, `go test ./...` 통과
+- 미검증:
+  - 실제 `delivery.spectra.kr` public E2E, SMTP mailbox render, 모두의캠프 backend 적용, Python/Django server SDK
+
 ## 2026-08-13 — Direct Email verification body SDK support
 
 - 목적: 모두의캠프 Go backend가 template을 먼저 생성하지 않고 관리자 로그인 인증 이메일을 발송할 수 있도록 Delivery의 direct verification body 계약을 Go server SDK에 반영.

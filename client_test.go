@@ -91,7 +91,99 @@ func TestCreateEmailVerificationSendsRequestAndParsesAcceptedResponse(t *testing
 	}
 }
 
-func TestCreateEmailVerificationSendsDirectBody(t *testing.T) {
+func TestEmailSendSendsDirectBodyAndParsesAcceptedResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want %s", r.Method, http.MethodPost)
+		}
+		if r.URL.Path != "/platform/v1/projects/project_123/email/delivery-requests" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer token_123" {
+			t.Fatalf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+		if r.Header.Get("Idempotency-Key") != "idem_12345678901" {
+			t.Fatalf("Idempotency-Key = %q", r.Header.Get("Idempotency-Key"))
+		}
+
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		assertEqual(t, body["recipient_email"], "user@example.com")
+		assertEqual(t, body["subject"], "Welcome")
+		assertEqual(t, body["text"], "Welcome to Spectra.")
+		assertEqual(t, body["html"], "<p>Welcome to <strong>Spectra</strong>.</p>")
+		metadata, ok := body["metadata"].(map[string]any)
+		if !ok {
+			t.Fatalf("metadata type = %T", body["metadata"])
+		}
+		assertEqual(t, metadata["campaign"], "welcome")
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"data":{"request_id":"req_123","status":"accepted","created_at":"2026-08-14T09:00:00Z"}}`))
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL)
+	request, err := client.Email.Send(context.Background(), SendEmailInput{
+		To:             "user@example.com",
+		Subject:        "Welcome",
+		Text:           "Welcome to Spectra.",
+		HTML:           "<p>Welcome to <strong>Spectra</strong>.</p>",
+		Metadata:       map[string]string{"campaign": "welcome"},
+		IdempotencyKey: "idem_12345678901",
+	})
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+	if request.RequestID != "req_123" {
+		t.Fatalf("request.RequestID = %q", request.RequestID)
+	}
+	if request.Status != "accepted" {
+		t.Fatalf("request.Status = %q", request.Status)
+	}
+	if request.CreatedAt.IsZero() {
+		t.Fatal("request.CreatedAt is zero")
+	}
+}
+
+func TestEmailSendValidatesInputWithoutHTTPRequest(t *testing.T) {
+	var requestCount int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL)
+	tests := []struct {
+		name  string
+		input SendEmailInput
+	}{
+		{name: "missing to", input: SendEmailInput{Subject: "Hello", Text: "Body"}},
+		{name: "missing subject", input: SendEmailInput{To: "user@example.com", Text: "Body"}},
+		{name: "subject header injection", input: SendEmailInput{To: "user@example.com", Subject: "Hello\r\nBcc: test@example.com", Text: "Body"}},
+		{name: "missing text", input: SendEmailInput{To: "user@example.com", Subject: "Hello"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := client.Email.Send(context.Background(), tt.input)
+			if err == nil {
+				t.Fatal("Send returned nil error")
+			}
+			if !IsCode(err, CodeValidationError) {
+				t.Fatalf("error code = %v, want %s", err, CodeValidationError)
+			}
+		})
+	}
+	if got := atomic.LoadInt32(&requestCount); got != 0 {
+		t.Fatalf("requestCount = %d, want 0", got)
+	}
+}
+
+func TestEmailVerificationSendCodeSendsDirectBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -122,8 +214,8 @@ func TestCreateEmailVerificationSendsDirectBody(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(t, server.URL)
-	challenge, err := client.Delivery.EmailVerifications.Create(context.Background(), CreateEmailVerificationInput{
-		RecipientEmail:   "admin@example.com",
+	challenge, err := client.Email.Verifications.SendCode(context.Background(), SendEmailCodeInput{
+		To:               "admin@example.com",
 		Subject:          "모두의캠프 관리자 로그인 인증 코드",
 		Text:             "인증 코드: {{verification_code}}\n만료: {{expires_at}}",
 		HTML:             "<p>인증 코드: <strong>{{verification_code}}</strong></p>",
@@ -263,7 +355,7 @@ func TestConfirmEmailVerificationSendsRequestAndParsesOKResponse(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(t, server.URL)
-	proof, err := client.EmailVerifications.Confirm(context.Background(), ConfirmEmailVerificationInput{
+	proof, err := client.Email.Verifications.ConfirmCode(context.Background(), ConfirmEmailCodeInput{
 		VerificationID: "ver_123",
 		Code:           "123456",
 	})

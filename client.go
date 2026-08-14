@@ -17,7 +17,7 @@ const (
 	DefaultBaseURL = "https://delivery.spectra.kr"
 
 	defaultTimeout   = 10 * time.Second
-	defaultUserAgent = "spectra-notification-go/0.1.1"
+	defaultUserAgent = "spectra-notification-go/0.1.2"
 )
 
 type Environment string
@@ -45,6 +45,7 @@ type Client struct {
 	httpClient      *http.Client
 	userAgent       string
 
+	Email              *EmailService
 	Delivery           *DeliveryService
 	EmailVerifications *EmailVerificationService
 }
@@ -105,10 +106,19 @@ func NewClient(config Config) (*Client, error) {
 		userAgent:       userAgent,
 	}
 	emailVerifications := &EmailVerificationService{client: client}
+	client.Email = &EmailService{client: client, Verifications: emailVerifications}
 	client.EmailVerifications = emailVerifications
 	client.Delivery = &DeliveryService{EmailVerifications: emailVerifications}
 
 	return client, nil
+}
+
+func (c *Client) projectEmailDeliveryRequestsURL() string {
+	return fmt.Sprintf(
+		"%s/platform/v1/projects/%s/email/delivery-requests",
+		c.baseURL,
+		url.PathEscape(c.projectID),
+	)
 }
 
 func (c *Client) doJSON(ctx context.Context, method string, requestURL string, input any, headers map[string]string, output any) error {

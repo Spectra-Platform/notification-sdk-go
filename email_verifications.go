@@ -37,9 +37,40 @@ type CreateEmailVerificationInput struct {
 	IdempotencyKey   string
 }
 
+type SendEmailCodeInput struct {
+	To               string
+	Subject          string
+	Text             string
+	HTML             string
+	ExpiresInSeconds int
+	Metadata         map[string]string
+	IdempotencyKey   string
+}
+
+type SendEmailLinkInput struct {
+	To               string
+	Subject          string
+	Text             string
+	HTML             string
+	RedirectURI      string
+	ExpiresInSeconds int
+	Metadata         map[string]string
+	IdempotencyKey   string
+}
+
 type ConfirmEmailVerificationInput struct {
 	VerificationID string
 	Code           string
+	LinkToken      string
+}
+
+type ConfirmEmailCodeInput struct {
+	VerificationID string
+	Code           string
+}
+
+type ConfirmEmailLinkInput struct {
+	VerificationID string
 	LinkToken      string
 }
 
@@ -94,6 +125,33 @@ func (s *EmailVerificationService) Create(ctx context.Context, input CreateEmail
 	return &challenge, nil
 }
 
+func (s *EmailVerificationService) SendCode(ctx context.Context, input SendEmailCodeInput) (*EmailVerificationChallenge, error) {
+	return s.Create(ctx, CreateEmailVerificationInput{
+		RecipientEmail:   input.To,
+		Method:           EmailVerificationMethodCode,
+		Subject:          input.Subject,
+		Text:             input.Text,
+		HTML:             input.HTML,
+		ExpiresInSeconds: input.ExpiresInSeconds,
+		Metadata:         input.Metadata,
+		IdempotencyKey:   input.IdempotencyKey,
+	})
+}
+
+func (s *EmailVerificationService) SendLink(ctx context.Context, input SendEmailLinkInput) (*EmailVerificationChallenge, error) {
+	return s.Create(ctx, CreateEmailVerificationInput{
+		RecipientEmail:   input.To,
+		Method:           EmailVerificationMethodLink,
+		Subject:          input.Subject,
+		Text:             input.Text,
+		HTML:             input.HTML,
+		RedirectURI:      input.RedirectURI,
+		ExpiresInSeconds: input.ExpiresInSeconds,
+		Metadata:         input.Metadata,
+		IdempotencyKey:   input.IdempotencyKey,
+	})
+}
+
 func (s *EmailVerificationService) Confirm(ctx context.Context, input ConfirmEmailVerificationInput) (*EmailVerificationProof, error) {
 	verificationID := strings.TrimSpace(input.VerificationID)
 	if verificationID == "" {
@@ -120,6 +178,20 @@ func (s *EmailVerificationService) Confirm(ctx context.Context, input ConfirmEma
 	}
 
 	return &proof, nil
+}
+
+func (s *EmailVerificationService) ConfirmCode(ctx context.Context, input ConfirmEmailCodeInput) (*EmailVerificationProof, error) {
+	return s.Confirm(ctx, ConfirmEmailVerificationInput{
+		VerificationID: input.VerificationID,
+		Code:           input.Code,
+	})
+}
+
+func (s *EmailVerificationService) ConfirmLink(ctx context.Context, input ConfirmEmailLinkInput) (*EmailVerificationProof, error) {
+	return s.Confirm(ctx, ConfirmEmailVerificationInput{
+		VerificationID: input.VerificationID,
+		LinkToken:      input.LinkToken,
+	})
 }
 
 type createEmailVerificationRequest struct {
